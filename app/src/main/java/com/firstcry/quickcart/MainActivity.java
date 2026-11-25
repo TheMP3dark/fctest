@@ -13,6 +13,8 @@ import android.graphics.Path;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.RippleDrawable;
 import android.content.res.ColorStateList;
+import android.media.RingtoneManager;
+import android.os.Vibrator;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
@@ -56,12 +58,13 @@ public class MainActivity extends Activity {
     static class Account {
         String name;
         String curl;
-        Account(String n, String c) { name=n; curl=c; }
+        String loadCurl = "";
+        Account(String n, String c, String l) { name=n; curl=c; loadCurl=(l==null?"":l); }
         JSONObject toJson() throws Exception {
-            JSONObject o = new JSONObject(); o.put("name", name); o.put("curl", curl); return o;
+            JSONObject o = new JSONObject(); o.put("name", name); o.put("curl", curl); o.put("loadCurl", loadCurl); return o;
         }
         static Account fromJson(JSONObject o) {
-            return new Account(o.optString("name"), o.optString("curl"));
+            return new Account(o.optString("name"), o.optString("curl"), o.optString("loadCurl"));
         }
     }
 
@@ -182,8 +185,9 @@ public class MainActivity extends Activity {
 
         refreshSpinner();
         buildBookmarksPage();
+        buildWatchPage();
         buildIsland();
-        showPage(false);
+        showPage(0);
     }
 
     // ================= Account picker =================
@@ -191,6 +195,7 @@ public class MainActivity extends Activity {
         if (accountValue == null) return;
         accountValue.setText(selectedIndex >= 0 && selectedIndex < accounts.size() ? accounts.get(selectedIndex).name : "None");
         updateAccountHint();
+        updateWatchHint();
     }
 
     private void updateAccountHint() {
@@ -223,7 +228,7 @@ public class MainActivity extends Activity {
     private LinearLayout bookmarkList;
     private TextView bookmarkCount;
     private EditText bookmarkInput;
-    private boolean onBookmarks = false;
+    private int currentPage = 0;
 
     private void loadBookmarks() {
         bookmarks.clear();
@@ -291,7 +296,11 @@ public class MainActivity extends Activity {
         Button use = button("Add Selected to Cart", true);
         LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(-1, dp(52)); up.topMargin = dp(10);
         page.addView(use, up);
-        use.setOnClickListener(v -> useSelectedBookmarks());
+        use.setOnClickListener(v -> useSelectedBookmarks(idsInput, 0));
+        Button useWatch = button("Watch Selected", false);
+        LinearLayout.LayoutParams uw = new LinearLayout.LayoutParams(-1, dp(50)); uw.topMargin = dp(10);
+        page.addView(useWatch, uw);
+        useWatch.setOnClickListener(v -> useSelectedBookmarks(watchInput, 2));
 
         refreshBookmarkList();
     }
@@ -353,9 +362,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void useSelectedBookmarks() {
+    private void useSelectedBookmarks(EditText target, int page) {
         if (bookmarkChecked.isEmpty()) { toast("Tick at least one bookmark."); return; }
-        StringBuilder sb = new StringBuilder(idsInput.getText().toString().trim());
+        StringBuilder sb = new StringBuilder(target.getText().toString().trim());
         int n = 0;
         for (String id : bookmarks) {
             if (bookmarkChecked.contains(id)) {
@@ -363,17 +372,17 @@ public class MainActivity extends Activity {
                 sb.append(id); n++;
             }
         }
-        idsInput.setText(sb.toString());
-        idsInput.setSelection(idsInput.length());
-        showPage(false);
-        toast(n + " product ID(s) added to the Cart page.");
+        target.setText(sb.toString());
+        target.setSelection(target.length());
+        showPage(page);
+        toast(n + " product ID(s) added.");
     }
 
     // ================= Bottom island (tab bar) =================
     static class Tab { LinearLayout view; TabIcon icon; TextView label; }
 
     static class TabIcon extends View {
-        static final int CART = 0, BOOKMARK = 1;
+        static final int CART = 0, BOOKMARK = 1, WATCH = 2;
         final int type;
         boolean selected = false;
         int color = Color.GRAY;
@@ -401,6 +410,16 @@ public class MainActivity extends Activity {
                 path.close();
                 p.setStyle(body);
                 c.drawPath(path, p);
+            } else if (type == WATCH) {
+                path.moveTo(w * .06f, h * .50f);
+                path.quadTo(w * .50f, h * -.02f, w * .94f, h * .50f);
+                path.quadTo(w * .50f, h * 1.02f, w * .06f, h * .50f);
+                path.close();
+                p.setStyle(body);
+                c.drawPath(path, p);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(selected ? Color.rgb(44, 44, 46) : color);
+                c.drawCircle(w * .50f, h * .50f, w * .14f, p);
             } else {
                 path.moveTo(w * .22f, h * .28f);
                 path.lineTo(w * .92f, h * .28f);
@@ -434,11 +453,15 @@ public class MainActivity extends Activity {
 
         tabCart = makeTab("Cart", TabIcon.CART);
         tabMarks = makeTab("Bookmarks", TabIcon.BOOKMARK);
-        island.addView(tabCart.view, new LinearLayout.LayoutParams(dp(104), dp(58)));
+        tabWatch = makeTab("Watch", TabIcon.WATCH);
+        island.addView(tabCart.view, new LinearLayout.LayoutParams(dp(88), dp(58)));
         addGap(island, 4);
-        island.addView(tabMarks.view, new LinearLayout.LayoutParams(dp(104), dp(58)));
-        tabCart.view.setOnClickListener(v -> showPage(false));
-        tabMarks.view.setOnClickListener(v -> showPage(true));
+        island.addView(tabMarks.view, new LinearLayout.LayoutParams(dp(88), dp(58)));
+        addGap(island, 4);
+        island.addView(tabWatch.view, new LinearLayout.LayoutParams(dp(88), dp(58)));
+        tabCart.view.setOnClickListener(v -> showPage(0));
+        tabMarks.view.setOnClickListener(v -> showPage(1));
+        tabWatch.view.setOnClickListener(v -> showPage(2));
 
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
         lp.bottomMargin = dp(14);
@@ -468,16 +491,20 @@ public class MainActivity extends Activity {
         t.label.setTextColor(c);
     }
 
-    private void showPage(boolean bookmarksPage) {
-        onBookmarks = bookmarksPage;
-        ScrollView in = bookmarksPage ? bookmarksScroll : homeScroll;
-        ScrollView out = bookmarksPage ? homeScroll : bookmarksScroll;
-        out.setVisibility(View.GONE);
-        in.setAlpha(0f);
-        in.setVisibility(View.VISIBLE);
-        in.animate().alpha(1f).setDuration(160);
-        styleTab(tabCart, !bookmarksPage);
-        styleTab(tabMarks, bookmarksPage);
+    private void showPage(int page) {
+        currentPage = page;
+        ScrollView[] pages = {homeScroll, bookmarksScroll, watchScroll};
+        for (int i = 0; i < pages.length; i++) {
+            if (i == page) {
+                pages[i].setAlpha(0f);
+                pages[i].setVisibility(View.VISIBLE);
+                pages[i].animate().alpha(1f).setDuration(160);
+            } else pages[i].setVisibility(View.GONE);
+        }
+        styleTab(tabCart, page == 0);
+        styleTab(tabMarks, page == 1);
+        styleTab(tabWatch, page == 2);
+        if (page == 2) updateWatchHint();
         hideKeyboard();
     }
 
@@ -487,9 +514,252 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (onBookmarks) showPage(false);
+        if (currentPage != 0) showPage(0);
         else super.onBackPressed();
     }
+
+    // ================= Watch (stock polling) =================
+    private ScrollView watchScroll;
+    private EditText watchInput;
+    private Button watchButton;
+    private TextView watchStatus, watchHint;
+    private Tab tabWatch;
+    private int watchInterval = 30;
+    private static final int[] SEG = {10, 30, 60, 120};
+    private final ArrayList<TextView> segViews = new ArrayList<>();
+    private volatile boolean watching = false;
+    private final ExecutorService watchExecutor = Executors.newSingleThreadExecutor();
+
+    static class LoadRequest { String url; JSONObject body; Map<String,String> headers = new HashMap<>(); }
+
+    private LoadRequest parseLoadCurl(String curl) throws Exception {
+        if (curl == null || curl.trim().isEmpty()) throw new Exception("Paste the LoadCart cURL.");
+        String s = curl.replaceAll("\\\\\\r?\\n", " ").trim();
+        Matcher url = Pattern.compile("(?:--url\\s+)?(['\"])(https?://[^'\"]+)\\1", Pattern.CASE_INSENSITIVE).matcher(s);
+        if (!url.find() || !url.group(2).contains("LoadCart")) throw new Exception("This must be the LoadCart cURL.");
+        LoadRequest r = new LoadRequest();
+        r.url = url.group(2);
+        Matcher h = Pattern.compile("-H\\s+(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(s);
+        while (h.find()) {
+            String line = h.group(2);
+            int colon = line.indexOf(':');
+            if (colon > 0) {
+                String key = line.substring(0, colon).trim().toLowerCase(Locale.ROOT);
+                String value = line.substring(colon + 1).trim();
+                if (key.equals("referer") || key.equals("user-agent") || key.equals("cookie") || key.equals("origin")
+                    || key.equals("fingerprint") || key.equals("accept-language")) r.headers.put(key, value);
+            }
+        }
+        Matcher data = Pattern.compile("--data-raw\\s+(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(s);
+        boolean found = data.find();
+        if (!found) {
+            data = Pattern.compile("--data\\s+(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(s);
+            found = data.find();
+        }
+        if (!found) throw new Exception("Could not find --data-raw JSON body.");
+        r.body = new JSONObject(data.group(2));
+        if (!r.body.has("pro")) throw new Exception("Request body must contain the pro field.");
+        return r;
+    }
+
+    // Calls LoadCart for the given product IDs and returns the ones present in PurchaseOrderItemList.
+    private Set<String> checkCart(LoadRequest lr, Collection<String> ids) throws Exception {
+        JSONObject body = new JSONObject(lr.body.toString());
+        StringBuilder pro = new StringBuilder();
+        for (String id : ids) { if (pro.length() > 0) pro.append("*"); pro.append("NO^").append(id).append("^1^0"); }
+        body.put("pro", pro.toString());
+        JSONObject res = postJson(lr.url, body, lr.headers);
+        JSONObject r = res.optJSONObject("LoadCartResult");
+        JSONObject os = r == null ? null : r.optJSONObject("pOrderSummary");
+        JSONArray list = os == null ? null : os.optJSONArray("PurchaseOrderItemList");
+        if (list == null) throw new Exception("No PurchaseOrderItemList: " + shorten(res.toString()));
+        HashSet<String> found = new HashSet<>();
+        for (int i = 0; i < list.length(); i++) collectIds(list.opt(i), ids, found);
+        return found;
+    }
+
+    private void collectIds(Object o, Collection<String> ids, Set<String> found) {
+        if (o instanceof JSONObject) {
+            JSONObject j = (JSONObject) o;
+            Iterator<String> it = j.keys();
+            while (it.hasNext()) collectIds(j.opt(it.next()), ids, found);
+        } else if (o instanceof JSONArray) {
+            JSONArray a = (JSONArray) o;
+            for (int i = 0; i < a.length(); i++) collectIds(a.opt(i), ids, found);
+        } else if (o != null && o != JSONObject.NULL) {
+            String v = String.valueOf(o).trim();
+            if (ids.contains(v)) found.add(v);
+        }
+    }
+
+    private void buildWatchPage() {
+        watchScroll = pageScroll();
+        LinearLayout page = pageColumn(watchScroll);
+        watchScroll.setVisibility(View.GONE);
+
+        page.addView(largeTitle("Watch"));
+        addSpace(page, 16);
+
+        addLabel(page, "ACCOUNT");
+        watchHint = text("", 15, WHITE);
+        watchHint.setPadding(dp(16), dp(14), dp(16), dp(14));
+        watchHint.setBackground(round(PANEL, 14, 0));
+        page.addView(watchHint, matchWrap());
+        page.addView(footnote("Uses the account selected on the Cart page. It needs a LoadCart cURL saved in that account (Cart → Edit)."));
+
+        addSpace(page, 28);
+        addLabel(page, "PRODUCT IDS");
+        watchInput = new EditText(this);
+        watchInput.setHint("24961441\n24961454");
+        watchInput.setTextSize(16);
+        watchInput.setGravity(Gravity.TOP | Gravity.LEFT);
+        watchInput.setMinLines(3); watchInput.setMaxLines(8);
+        watchInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        styleField(watchInput);
+        page.addView(watchInput, matchWrap());
+        page.addView(footnote("Each check adds the product to the cart, then confirms it in LoadCart. Confirmed IDs stop being watched."));
+
+        addSpace(page, 28);
+        addLabel(page, "CHECK EVERY");
+        LinearLayout seg = new LinearLayout(this);
+        seg.setBackground(round(PANEL, 12, 0));
+        seg.setPadding(dp(3), dp(3), dp(3), dp(3));
+        for (int i = 0; i < SEG.length; i++) {
+            final int secs = SEG[i];
+            TextView t = text(secs < 60 ? secs + " sec" : (secs / 60) + " min", 14, WHITE);
+            t.setGravity(Gravity.CENTER);
+            t.setClickable(true);
+            t.setOnClickListener(v -> { watchInterval = secs; styleSegments(); });
+            segViews.add(t);
+            seg.addView(t, new LinearLayout.LayoutParams(0, dp(38), 1));
+        }
+        page.addView(seg, matchWrap());
+        styleSegments();
+
+        watchButton = button("Start Watching", true);
+        LinearLayout.LayoutParams wb = new LinearLayout.LayoutParams(-1, dp(52)); wb.topMargin = dp(18);
+        page.addView(watchButton, wb);
+        watchButton.setOnClickListener(v -> toggleWatch());
+
+        addSpace(page, 28);
+        addLabel(page, "STATUS");
+        watchStatus = text("Not watching.", 13, MUTED);
+        watchStatus.setPadding(dp(16), dp(14), dp(16), dp(14));
+        watchStatus.setBackground(round(PANEL, 14, 0));
+        page.addView(watchStatus, matchWrap());
+        page.addView(footnote("Keep the app open while watching; the screen stays on. Very frequent checks can get an account rate-limited, so 30 seconds or slower is safer."));
+        updateWatchHint();
+    }
+
+    private void styleSegments() {
+        for (int i = 0; i < segViews.size(); i++) {
+            boolean sel = SEG[i] == watchInterval;
+            TextView t = segViews.get(i);
+            t.setBackground(sel ? round(FIELD, 9, 0) : null);
+            t.setTextColor(sel ? WHITE : MUTED);
+        }
+    }
+
+    private void updateWatchHint() {
+        if (watchHint == null) return;
+        if (selectedIndex < 0 || selectedIndex >= accounts.size()) {
+            watchHint.setText("No account selected"); watchHint.setTextColor(RED); return;
+        }
+        Account a = accounts.get(selectedIndex);
+        boolean ok = a.loadCurl != null && !a.loadCurl.trim().isEmpty();
+        watchHint.setText(a.name + "  ·  " + (ok ? "LoadCart saved ✓" : "LoadCart cURL missing ✕"));
+        watchHint.setTextColor(ok ? WHITE : RED);
+    }
+
+    private void toggleWatch() {
+        if (watching) { watching = false; return; }
+        if (selectedIndex < 0 || selectedIndex >= accounts.size()) { toast("Select or add an account first."); return; }
+        final Account account = accounts.get(selectedIndex);
+        if (account.loadCurl == null || account.loadCurl.trim().isEmpty()) { toast("Edit the account and paste its LoadCart cURL first."); return; }
+        final LinkedHashSet<String> ids = new LinkedHashSet<>();
+        Matcher m = Pattern.compile("\\d+").matcher(watchInput.getText().toString());
+        while (m.find()) ids.add(m.group());
+        if (ids.isEmpty()) { toast("Enter at least one numeric product ID."); return; }
+        final CurlRequest addReq;
+        final LoadRequest loadReq;
+        try { addReq = parseCurl(account.curl); loadReq = parseLoadCurl(account.loadCurl); }
+        catch (Exception e) { toast("Saved cURL needs updating: " + e.getMessage()); return; }
+        watching = true;
+        watchButton.setText("Stop Watching");
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        final int interval = watchInterval;
+        hideKeyboard();
+        watchExecutor.execute(() -> runWatch(account.name, ids, addReq, loadReq, interval));
+    }
+
+    private void runWatch(String accountName, LinkedHashSet<String> ids, CurlRequest addReq, LoadRequest loadReq, int interval) {
+        LinkedHashMap<String, String> state = new LinkedHashMap<>();
+        LinkedHashSet<String> pending = new LinkedHashSet<>(ids);   // not added yet (add call failing = not available)
+        LinkedHashSet<String> added = new LinkedHashSet<>();        // added, waiting to appear in LoadCart
+        for (String id : ids) state.put(id, "◌  not checked yet");
+        int round = 0;
+        while (watching && (!pending.isEmpty() || !added.isEmpty())) {
+            round++;
+            final String checking = renderWatch(accountName, round, clock(), "Checking…", state);
+            main.post(() -> watchStatus.setText(checking));
+            boolean newHit = false;
+            for (String id : new ArrayList<>(pending)) {
+                if (!watching) break;
+                try {
+                    addOne(id, addReq);
+                    pending.remove(id);
+                    added.add(id);
+                    state.put(id, "＋  added to cart · confirming…");
+                } catch (Exception e) {
+                    state.put(id, "⏳  not available yet · " + shorten(e.getMessage()));
+                }
+                sleepMs(350);
+            }
+            if (watching && !added.isEmpty()) {
+                try {
+                    Set<String> found = checkCart(loadReq, added);
+                    for (String id : found) { added.remove(id); state.put(id, "✓  IN STOCK · confirmed in cart"); newHit = true; }
+                    for (String id : added) state.put(id, "＋  added · not in LoadCart yet");
+                } catch (Exception e) {
+                    for (String id : added) state.put(id, "＋  added · LoadCart error: " + shorten(e.getMessage()));
+                }
+            }
+            if (newHit) main.post(this::alertUser);
+            if (pending.isEmpty() && added.isEmpty()) break;
+            final int r = round;
+            final String stamp = clock();
+            for (int s = interval; s > 0 && watching; s--) {
+                final String t = renderWatch(accountName, r, stamp, "Next check in " + s + "s", state);
+                main.post(() -> watchStatus.setText(t));
+                sleepMs(1000);
+            }
+        }
+        final boolean done = pending.isEmpty() && added.isEmpty();
+        final String finalText = renderWatch(accountName, round, clock(), done ? "Finished: all items confirmed." : "Stopped.", state);
+        main.post(() -> {
+            watching = false;
+            watchButton.setText("Start Watching");
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            watchStatus.setText(finalText);
+        });
+    }
+
+    private String renderWatch(String acc, int round, String stamp, String footer, Map<String, String> state) {
+        StringBuilder b = new StringBuilder();
+        b.append(acc).append(" · round ").append(round).append(" · ").append(stamp).append("\n").append(footer).append("\n");
+        for (Map.Entry<String, String> e : state.entrySet()) b.append("\n").append(e.getKey()).append("   ").append(e.getValue());
+        return b.toString();
+    }
+
+    private void alertUser() {
+        toast("Item in stock and added to cart!");
+        try { RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play(); } catch (Exception ignored) {}
+        try { Vibrator vb = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE); if (vb != null) vb.vibrate(600); } catch (Exception ignored) {}
+    }
+
+    private String clock() { return new java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()); }
+    private String shorten(String s) { if (s == null) return "error"; s = s.replace("\n", " "); return s.length() > 70 ? s.substring(0, 70) + "…" : s; }
+    private void sleepMs(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) {} }
 
     // ================= Small UI helpers =================
     private ScrollView pageScroll() {
@@ -545,19 +815,22 @@ public class MainActivity extends Activity {
         Account old=editing?accounts.get(index):null;
         LinearLayout box=new LinearLayout(this); box.setPadding(dp(18),dp(8),dp(18),dp(2)); box.setOrientation(LinearLayout.VERTICAL);
         EditText name=new EditText(this); name.setSingleLine(true); name.setHint("Account name (e.g. FC1 – Paru)");
-        EditText curl=new EditText(this); curl.setHint("Paste complete SaveProductCart cURL here"); curl.setMinLines(7); curl.setMaxLines(12); curl.setGravity(Gravity.TOP);
-        name.setTextColor(WHITE);name.setHintTextColor(MUTED);curl.setTextColor(WHITE);curl.setHintTextColor(MUTED);
-        styleField(name);styleField(curl);name.setBackground(round(FIELD,10,0));curl.setBackground(round(FIELD,10,0));
-        if(editing){name.setText(old.name);curl.setText(old.curl);}
-        box.addView(name,matchWrap()); addSpace(box,8); box.addView(curl,matchWrap());
+        EditText curl=new EditText(this); curl.setHint("Paste complete SaveProductCart cURL here"); curl.setMinLines(6); curl.setMaxLines(10); curl.setGravity(Gravity.TOP);
+        EditText lcurl=new EditText(this); lcurl.setHint("Optional: LoadCart cURL (needed for Watch)"); lcurl.setMinLines(4); lcurl.setMaxLines(8); lcurl.setGravity(Gravity.TOP);
+        EditText[] fields={name,curl,lcurl};
+        for(EditText f:fields){f.setTextColor(WHITE);f.setHintTextColor(MUTED);styleField(f);f.setBackground(round(FIELD,10,0));}
+        if(editing){name.setText(old.name);curl.setText(old.curl);lcurl.setText(old.loadCurl);}
+        box.addView(name,matchWrap()); addSpace(box,8); box.addView(curl,matchWrap()); addSpace(box,8); box.addView(lcurl,matchWrap());
+        ScrollView sv=new ScrollView(this); sv.addView(box);
         AlertDialog dialog=dialogBuilder().setTitle(editing?"Edit account":"Add FirstCry account")
-            .setView(box).setNegativeButton("CANCEL",null).setPositiveButton("SAVE",null).create();
+            .setView(sv).setNegativeButton("CANCEL",null).setPositiveButton("SAVE",null).create();
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-            String n=name.getText().toString().trim(), c=curl.getText().toString().trim();
+            String n=name.getText().toString().trim(), c=curl.getText().toString().trim(), lc=lcurl.getText().toString().trim();
             if(n.isEmpty()){name.setError("Enter an account name");return;}
             try{parseCurl(c);}catch(Exception e){curl.setError(e.getMessage());return;}
-            if(editing){accounts.set(index,new Account(n,c));selectedIndex=index;}
-            else{accounts.add(new Account(n,c));selectedIndex=accounts.size()-1;}
+            if(!lc.isEmpty()){try{parseLoadCurl(lc);}catch(Exception e){lcurl.setError(e.getMessage());return;}}
+            if(editing){accounts.set(index,new Account(n,c,lc));selectedIndex=index;}
+            else{accounts.add(new Account(n,c,lc));selectedIndex=accounts.size()-1;}
             saveAccounts();dialog.dismiss();toast("Account saved.");
         }));
         dialog.show();
@@ -685,11 +958,13 @@ public class MainActivity extends Activity {
         conn.setRequestMethod("POST");conn.setConnectTimeout(20000);conn.setReadTimeout(25000);conn.setDoOutput(true);
         conn.setRequestProperty("Accept","application/json, text/javascript, */*; q=0.01");
         conn.setRequestProperty("Content-Type","application/json; charset=UTF-8");
-        conn.setRequestProperty("X-Requested-With","XMLHttpRequest");
+        if(!url.contains("fcappservices.in"))conn.setRequestProperty("X-Requested-With","XMLHttpRequest");
         conn.setRequestProperty("Referer",headers.containsKey("referer")?headers.get("referer"):"https://www.firstcry.com/");
         conn.setRequestProperty("User-Agent",headers.containsKey("user-agent")?headers.get("user-agent"):"Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/157.0.0.0 Mobile Safari/537.36");
         if(headers.containsKey("cookie"))conn.setRequestProperty("Cookie",headers.get("cookie"));
         if(headers.containsKey("origin"))conn.setRequestProperty("Origin",headers.get("origin"));
+        if(headers.containsKey("fingerprint"))conn.setRequestProperty("fingerprint",headers.get("fingerprint"));
+        if(headers.containsKey("accept-language"))conn.setRequestProperty("Accept-Language",headers.get("accept-language"));
         byte[] bytes=body.toString().getBytes(StandardCharsets.UTF_8);
         try(OutputStream os=conn.getOutputStream()){os.write(bytes);}
         int code=conn.getResponseCode();
@@ -747,5 +1022,5 @@ public class MainActivity extends Activity {
     private int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+0.5f);}
     private String join(List<String> s){StringBuilder b=new StringBuilder();for(String x:s){if(b.length()>0)b.append("\n");b.append(x);}return b.toString();}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
-    @Override protected void onDestroy(){super.onDestroy();executor.shutdown();}
+    @Override protected void onDestroy(){super.onDestroy();watching=false;executor.shutdown();watchExecutor.shutdownNow();}
 }

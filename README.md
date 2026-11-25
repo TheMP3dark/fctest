@@ -19,6 +19,8 @@ The workflow builds with Java 17, Gradle 8.7 and Android SDK 35. It runs on push
 - For each product, call `SaveProductCart`, then `SaveCartDetail`.
 - **Bookmarks:** use the floating bottom island (Cart | Bookmarks) to switch pages. On Bookmarks, add product IDs (one per line, comma- or space-separated), remove them with ✕, tick any and press **Add Selected to Cart** to send them to the Cart page's Product IDs box. Bookmarks are stored locally on the device.
 
+- **Watch (stock polling):** save each account's `LoadCart` cURL too (Cart → Edit). On the Watch tab enter product IDs and a check interval. Every round it calls `SaveProductCart` + `SaveCartDetail` for IDs not yet added, then calls `LoadCart` and looks for the ID anywhere in `LoadCartResult.pOrderSummary.PurchaseOrderItemList`. A match means it is in stock and in your cart: the app alerts (sound + vibration) and stops watching that ID. The app must stay open (screen kept on).
+
 ## Important API limitation to test
 This is a first native prototype based on the two FirstCry request payloads supplied in the conversation. A browser extension automatically uses the browser's cookie/session context. A native app does not inherit Chrome/Brave/Edge cookies. The app therefore sends the saved `ftk` and the relevant cURL headers (Referer, User-Agent, Cookie if present). If FirstCry requires additional browser-bound cookies or anti-bot/session state, a direct native request may be rejected; the app will show the returned error and we will need to add an account login/session-capture flow.
 

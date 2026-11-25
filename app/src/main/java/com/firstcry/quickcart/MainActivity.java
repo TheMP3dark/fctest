@@ -7,6 +7,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.RippleDrawable;
+import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
@@ -29,8 +35,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
-    private static final int BG = Color.rgb(15,15,15);
-    private static final int PANEL = Color.rgb(27,27,27);
+    private static final int BG = Color.BLACK;
+    private static final int PANEL = Color.rgb(28,28,30);
+    private static final int FIELD = Color.rgb(44,44,46);
+    private static final int DIV = Color.rgb(44,44,46);
     private static final int RED = Color.rgb(227,38,54);
     private static final int WHITE = Color.rgb(245,245,245);
     private static final int MUTED = Color.rgb(160,160,160);
@@ -38,7 +46,8 @@ public class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private final ArrayList<Account> accounts = new ArrayList<>();
-    private Spinner accountSpinner;
+    private LinearLayout accountRow;
+    private TextView accountValue;
     private TextView accountHint, resultView;
     private EditText idsInput;
     private Button addButton, addAllButton;
@@ -58,8 +67,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.rgb(9,9,9));
-        getWindow().setNavigationBarColor(Color.rgb(9,9,9));
+        getWindow().setStatusBarColor(Color.BLACK);
+        getWindow().setNavigationBarColor(Color.BLACK);
         prefs = getSharedPreferences("fc_accounts", MODE_PRIVATE);
         loadAccounts();
         loadBookmarks();
@@ -88,106 +97,133 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(BG);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
-            v.setPadding(0, insets.getStableInsetTop(), 0, insets.getStableInsetBottom());
+            int sys = insets.getSystemWindowInsetBottom(), stable = insets.getStableInsetBottom();
+            boolean keyboard = sys - stable > dp(100);
+            v.setPadding(0, insets.getStableInsetTop(), 0, sys);
+            if (island != null) island.setVisibility(keyboard ? View.GONE : View.VISIBLE);
             return insets;
         });
         setContentView(root);
 
-        homeScroll = new ScrollView(this);
-        homeScroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(22), dp(18), dp(22));
-        page.setBackgroundColor(BG);
-        homeScroll.addView(page);
-        root.addView(homeScroll, new FrameLayout.LayoutParams(-1, -1));
+        homeScroll = pageScroll();
+        LinearLayout page = pageColumn(homeScroll);
+        page.addView(largeTitle("Quick Cart"));
+        addSpace(page, 16);
 
-        page.addView(buildHeader("FirstCry Quick Cart"));
-        addSpace(page, 22);
-
-        addLabel(page, "SELECT ACCOUNT");
-        accountSpinner = new Spinner(this);
-        styleSpinner(accountSpinner);
-        page.addView(accountSpinner, matchWrap());
-        accountSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                selectedIndex = accounts.isEmpty() ? -1 : pos;
-                prefs.edit().putInt("selected", selectedIndex).apply();
-                updateAccountHint();
-            }
-            public void onNothingSelected(AdapterView<?> p) {}
-        });
-        accountHint = new TextView(this); accountHint.setTextColor(MUTED); accountHint.setTextSize(11);
+        addLabel(page, "ACCOUNT");
+        accountRow = new LinearLayout(this);
+        accountRow.setGravity(Gravity.CENTER_VERTICAL);
+        accountRow.setPadding(dp(16), 0, dp(14), 0);
+        accountRow.setBackground(ripple(PANEL, 14));
+        accountRow.setClickable(true);
+        accountRow.addView(text("Account", 16, WHITE));
+        accountValue = text("", 16, MUTED);
+        accountValue.setGravity(Gravity.END);
+        accountValue.setSingleLine(true);
+        accountValue.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(0, -2, 1);
+        vp.leftMargin = dp(12);
+        accountRow.addView(accountValue, vp);
+        TextView chev = text("›", 24, MUTED);
+        chev.setPadding(dp(8), 0, 0, dp(2));
+        accountRow.addView(chev);
+        page.addView(accountRow, new LinearLayout.LayoutParams(-1, dp(52)));
+        accountRow.setOnClickListener(v -> showAccountPicker());
+        accountHint = footnote("");
         page.addView(accountHint);
-        LinearLayout accountActions = new LinearLayout(this); accountActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button addAccount = button("＋ ADD ACCOUNT", true);
-        Button editAccount = button("EDIT", false);
-        Button deleteAccount = button("DELETE", false);
-        accountActions.addView(addAccount, new LinearLayout.LayoutParams(0, dp(44), 1));
-        addGap(accountActions, 6);
-        accountActions.addView(editAccount, new LinearLayout.LayoutParams(0, dp(44), 0.65f));
-        addGap(accountActions, 6);
-        accountActions.addView(deleteAccount, new LinearLayout.LayoutParams(0, dp(44), 0.7f));
+
+        addSpace(page, 12);
+        LinearLayout accountActions = new LinearLayout(this);
+        Button addAccount = button("Add Account", true);
+        Button editAccount = button("Edit", false);
+        Button deleteAccount = button("Delete", false);
+        deleteAccount.setTextColor(RED);
+        accountActions.addView(addAccount, new LinearLayout.LayoutParams(0, dp(50), 1.3f));
+        addGap(accountActions, 8);
+        accountActions.addView(editAccount, new LinearLayout.LayoutParams(0, dp(50), 0.8f));
+        addGap(accountActions, 8);
+        accountActions.addView(deleteAccount, new LinearLayout.LayoutParams(0, dp(50), 0.8f));
         page.addView(accountActions);
         addAccount.setOnClickListener(v -> showAccountDialog(-1));
         editAccount.setOnClickListener(v -> { if(selectedIndex>=0) showAccountDialog(selectedIndex); else toast("Add an account first."); });
         deleteAccount.setOnClickListener(v -> confirmDelete());
 
-        addSpace(page, 25);
-        addLabel(page, "PRODUCT IDs");
-        TextView sub = new TextView(this); sub.setText("One per line, comma-separated or space-separated"); sub.setTextColor(MUTED); sub.setTextSize(11);
-        page.addView(sub);
+        addSpace(page, 28);
+        addLabel(page, "PRODUCT IDS");
         idsInput = new EditText(this);
         idsInput.setHint("24961441\n24961454\n24476798");
-        idsInput.setHintTextColor(Color.GRAY);
-        idsInput.setTextColor(WHITE);
-        idsInput.setTextSize(15);
+        idsInput.setTextSize(16);
         idsInput.setGravity(Gravity.TOP | Gravity.LEFT);
         idsInput.setMinLines(5); idsInput.setMaxLines(9);
-        idsInput.setPadding(dp(12),dp(12),dp(12),dp(12));
-        idsInput.setInputType( android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        idsInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         styleField(idsInput);
-        LinearLayout.LayoutParams ip = matchWrap(); ip.topMargin=dp(7); page.addView(idsInput, ip);
+        page.addView(idsInput, matchWrap());
+        page.addView(footnote("One per line, comma-separated or space-separated"));
 
-        addButton = button("ADD TO CART", true);
-        LinearLayout.LayoutParams bp = matchWrap(); bp.topMargin=dp(12); page.addView(addButton,bp);
+        addButton = button("Add to Cart", true);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, dp(52)); bp.topMargin = dp(14);
+        page.addView(addButton, bp);
         addButton.setOnClickListener(v -> startAdd());
 
-        addAllButton = button("ADD TO ALL ACCOUNT CART", false);
-        LinearLayout.LayoutParams allBp = matchWrap(); allBp.topMargin=dp(8);
+        addAllButton = button("Add to All Accounts", false);
+        LinearLayout.LayoutParams allBp = new LinearLayout.LayoutParams(-1, dp(52)); allBp.topMargin = dp(10);
         page.addView(addAllButton, allBp);
         addAllButton.setOnClickListener(v -> confirmAddToAll());
 
-        addSpace(page, 18);
+        addSpace(page, 28);
         addLabel(page, "RESULTS");
-        resultView = new TextView(this);
-        resultView.setText("Ready. Select an account and enter product IDs.");
-        resultView.setTextColor(MUTED); resultView.setTextSize(12);
-        resultView.setPadding(dp(12),dp(12),dp(12),dp(12));
-        resultView.setBackground(round(PANEL,10,Color.rgb(48,48,48)));
+        resultView = text("Ready. Select an account and enter product IDs.", 13, MUTED);
+        resultView.setPadding(dp(16), dp(14), dp(16), dp(14));
+        resultView.setBackground(round(PANEL, 14, 0));
         page.addView(resultView, matchWrap());
 
-        addSpace(page, 16);
-        TextView note = new TextView(this);
-        note.setText("Your saved cURL contains an ftk session token. It is stored in this app's private local storage. Do not share it. Tokens may expire; replace the cURL when needed.");
-        note.setTextColor(MUTED); note.setTextSize(11);
-        page.addView(note);
+        addSpace(page, 14);
+        page.addView(footnote("Your saved cURL contains an ftk session token. It is stored in this app's private local storage. Do not share it. Tokens may expire; replace the cURL when needed."));
+
         refreshSpinner();
         buildBookmarksPage();
-        buildDrawer();
+        buildIsland();
         showPage(false);
     }
 
-    // ================= Bookmarks + burger menu =================
+    // ================= Account picker =================
+    private void refreshSpinner() {
+        if (accountValue == null) return;
+        accountValue.setText(selectedIndex >= 0 && selectedIndex < accounts.size() ? accounts.get(selectedIndex).name : "None");
+        updateAccountHint();
+    }
+
+    private void updateAccountHint() {
+        if (accountHint == null) return;
+        if (selectedIndex >= 0 && selectedIndex < accounts.size()) accountHint.setText("Saved locally · " + accounts.get(selectedIndex).name);
+        else accountHint.setText("Add an account and paste its SaveProductCart cURL.");
+    }
+
+    private void showAccountPicker() {
+        if (accounts.isEmpty()) { toast("Add an account first."); return; }
+        String[] names = new String[accounts.size()];
+        for (int i = 0; i < names.length; i++) names[i] = accounts.get(i).name;
+        dialogBuilder().setTitle("Select Account")
+            .setSingleChoiceItems(names, selectedIndex, (d, which) -> {
+                selectedIndex = which;
+                prefs.edit().putInt("selected", selectedIndex).apply();
+                refreshSpinner();
+                d.dismiss();
+            })
+            .setNegativeButton("CANCEL", null).show();
+    }
+
+    private AlertDialog.Builder dialogBuilder() { return new AlertDialog.Builder(this, R.style.DialogTheme); }
+
+    // ================= Bookmarks page =================
     private final ArrayList<String> bookmarks = new ArrayList<>();
     private final LinkedHashSet<String> bookmarkChecked = new LinkedHashSet<>();
     private FrameLayout root;
     private ScrollView homeScroll, bookmarksScroll;
-    private LinearLayout bookmarkList, drawer;
-    private TextView bookmarkCount, drawerCartItem, drawerBookmarksItem;
+    private LinearLayout bookmarkList;
+    private TextView bookmarkCount;
     private EditText bookmarkInput;
-    private View scrim;
-    private boolean drawerOpen = false, onBookmarks = false;
+    private boolean onBookmarks = false;
 
     private void loadBookmarks() {
         bookmarks.clear();
@@ -207,89 +243,53 @@ public class MainActivity extends Activity {
         refreshBookmarkList();
     }
 
-    private LinearLayout buildHeader(String text) {
-        LinearLayout header = new LinearLayout(this);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout burger = new LinearLayout(this);
-        burger.setOrientation(LinearLayout.VERTICAL);
-        burger.setGravity(Gravity.CENTER);
-        burger.setClickable(true);
-        for (int i = 0; i < 3; i++) {
-            View bar = new View(this);
-            bar.setBackground(round(WHITE, 1, WHITE));
-            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(dp(22), dp(2));
-            if (i > 0) bp.topMargin = dp(5);
-            burger.addView(bar, bp);
-        }
-        burger.setOnClickListener(v -> { hideKeyboard(); if (drawerOpen) closeDrawer(); else openDrawer(); });
-        header.addView(burger, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        addGap(header, 6);
-
-        TextView dot = new TextView(this); dot.setText("●"); dot.setTextColor(RED); dot.setTextSize(19);
-        header.addView(dot);
-        TextView title = new TextView(this); title.setText("  " + text); title.setTextColor(WHITE);
-        title.setTextSize(22); title.setTypeface(null, Typeface.BOLD);
-        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        return header;
-    }
-
     private void buildBookmarksPage() {
-        bookmarksScroll = new ScrollView(this);
-        bookmarksScroll.setFillViewport(true);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(18), dp(22), dp(18), dp(22));
-        page.setBackgroundColor(BG);
-        bookmarksScroll.addView(page);
-        root.addView(bookmarksScroll, new FrameLayout.LayoutParams(-1, -1));
+        bookmarksScroll = pageScroll();
+        LinearLayout page = pageColumn(bookmarksScroll);
         bookmarksScroll.setVisibility(View.GONE);
 
-        page.addView(buildHeader("Bookmarks"));
-        addSpace(page, 22);
+        page.addView(largeTitle("Bookmarks"));
+        addSpace(page, 16);
 
-        addLabel(page, "ADD PRODUCT IDs");
-        TextView sub = new TextView(this); sub.setText("One per line, comma-separated or space-separated"); sub.setTextColor(MUTED); sub.setTextSize(11);
-        page.addView(sub);
+        addLabel(page, "ADD PRODUCT IDS");
         bookmarkInput = new EditText(this);
         bookmarkInput.setHint("24961441\n24961454");
-        bookmarkInput.setHintTextColor(Color.GRAY);
-        bookmarkInput.setTextColor(WHITE);
-        bookmarkInput.setTextSize(15);
+        bookmarkInput.setTextSize(16);
         bookmarkInput.setGravity(Gravity.TOP | Gravity.LEFT);
         bookmarkInput.setMinLines(3); bookmarkInput.setMaxLines(6);
         bookmarkInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         styleField(bookmarkInput);
-        LinearLayout.LayoutParams ip = matchWrap(); ip.topMargin = dp(7); page.addView(bookmarkInput, ip);
+        page.addView(bookmarkInput, matchWrap());
+        page.addView(footnote("One per line, comma-separated or space-separated"));
 
-        Button save = button("＋ SAVE TO BOOKMARKS", true);
-        LinearLayout.LayoutParams sp = matchWrap(); sp.topMargin = dp(12); page.addView(save, sp);
+        Button save = button("Save to Bookmarks", true);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1, dp(52)); sp.topMargin = dp(14);
+        page.addView(save, sp);
         save.setOnClickListener(v -> saveBookmarkInput());
 
-        addSpace(page, 25);
-        bookmarkCount = new TextView(this);
-        bookmarkCount.setTextColor(MUTED); bookmarkCount.setTextSize(11); bookmarkCount.setTypeface(null, Typeface.BOLD);
-        LinearLayout.LayoutParams cp = matchWrap(); cp.bottomMargin = dp(6);
+        addSpace(page, 28);
+        bookmarkCount = makeLabel("");
+        LinearLayout.LayoutParams cp = matchWrap(); cp.bottomMargin = dp(8);
         page.addView(bookmarkCount, cp);
-
-        LinearLayout selRow = new LinearLayout(this);
-        Button selAll = button("SELECT ALL", false);
-        Button selNone = button("CLEAR", false);
-        selRow.addView(selAll, new LinearLayout.LayoutParams(0, dp(40), 1));
-        addGap(selRow, 6);
-        selRow.addView(selNone, new LinearLayout.LayoutParams(0, dp(40), 1));
-        page.addView(selRow);
-        selAll.setOnClickListener(v -> { bookmarkChecked.addAll(bookmarks); refreshBookmarkList(); });
-        selNone.setOnClickListener(v -> { bookmarkChecked.clear(); refreshBookmarkList(); });
 
         bookmarkList = new LinearLayout(this);
         bookmarkList.setOrientation(LinearLayout.VERTICAL);
-        bookmarkList.setBackground(round(PANEL, 10, Color.rgb(48, 48, 48)));
-        LinearLayout.LayoutParams lp = matchWrap(); lp.topMargin = dp(8);
-        page.addView(bookmarkList, lp);
+        bookmarkList.setBackground(round(PANEL, 14, 0));
+        page.addView(bookmarkList, matchWrap());
 
-        Button use = button("USE SELECTED IN CART", true);
-        LinearLayout.LayoutParams up = matchWrap(); up.topMargin = dp(12);
+        LinearLayout selRow = new LinearLayout(this);
+        Button selAll = button("Select All", false);
+        Button selNone = button("Clear", false);
+        selRow.addView(selAll, new LinearLayout.LayoutParams(0, dp(46), 1));
+        addGap(selRow, 8);
+        selRow.addView(selNone, new LinearLayout.LayoutParams(0, dp(46), 1));
+        LinearLayout.LayoutParams rp = matchWrap(); rp.topMargin = dp(12);
+        page.addView(selRow, rp);
+        selAll.setOnClickListener(v -> { bookmarkChecked.addAll(bookmarks); refreshBookmarkList(); });
+        selNone.setOnClickListener(v -> { bookmarkChecked.clear(); refreshBookmarkList(); });
+
+        Button use = button("Add Selected to Cart", true);
+        LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(-1, dp(52)); up.topMargin = dp(10);
         page.addView(use, up);
         use.setOnClickListener(v -> useSelectedBookmarks());
 
@@ -314,38 +314,42 @@ public class MainActivity extends Activity {
         if (bookmarkList == null) return;
         bookmarkChecked.retainAll(bookmarks);
         bookmarkList.removeAllViews();
-        bookmarkCount.setText("SAVED BOOKMARKS (" + bookmarks.size() + ")");
-        if (drawerBookmarksItem != null) drawerBookmarksItem.setText("Bookmarks  (" + bookmarks.size() + ")");
+        bookmarkCount.setText("SAVED (" + bookmarks.size() + ")");
         if (bookmarks.isEmpty()) {
-            TextView e = new TextView(this);
-            e.setText("No bookmarks yet. Add product IDs above.");
-            e.setTextColor(MUTED); e.setTextSize(12);
-            e.setPadding(dp(12), dp(14), dp(12), dp(14));
-            bookmarkList.addView(e);
+            TextView e = text("No bookmarks yet. Add product IDs above.", 14, MUTED);
+            e.setGravity(Gravity.CENTER);
+            e.setPadding(dp(16), dp(24), dp(16), dp(24));
+            bookmarkList.addView(e, matchWrap());
             return;
         }
+        boolean first = true;
         for (final String id : bookmarks) {
+            if (!first) {
+                View line = new View(this);
+                line.setBackgroundColor(DIV);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(1));
+                lp.leftMargin = dp(16);
+                bookmarkList.addView(line, lp);
+            }
+            first = false;
+
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(6), 0, dp(2), 0);
+            row.setPadding(dp(10), 0, dp(2), 0);
 
             CheckBox cb = new CheckBox(this);
-            cb.setText(id); cb.setTextColor(WHITE); cb.setTextSize(15);
-            cb.setButtonTintList(android.content.res.ColorStateList.valueOf(RED));
+            cb.setText(id); cb.setTextColor(WHITE); cb.setTextSize(16);
+            cb.setButtonTintList(ColorStateList.valueOf(RED));
             cb.setChecked(bookmarkChecked.contains(id));
             cb.setOnCheckedChangeListener((b, c) -> { if (c) bookmarkChecked.add(id); else bookmarkChecked.remove(id); });
-            row.addView(cb, new LinearLayout.LayoutParams(0, dp(48), 1));
+            row.addView(cb, new LinearLayout.LayoutParams(0, dp(52), 1));
 
-            TextView rm = new TextView(this);
-            rm.setText("✕"); rm.setTextColor(MUTED); rm.setTextSize(18); rm.setGravity(Gravity.CENTER);
+            TextView rm = text("✕", 17, MUTED);
+            rm.setGravity(Gravity.CENTER);
             rm.setClickable(true);
             rm.setOnClickListener(v -> { bookmarks.remove(id); bookmarkChecked.remove(id); saveBookmarks(); });
-            row.addView(rm, new LinearLayout.LayoutParams(dp(48), dp(48)));
-            bookmarkList.addView(row);
-
-            View line = new View(this);
-            line.setBackgroundColor(Color.rgb(40, 40, 40));
-            bookmarkList.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+            row.addView(rm, new LinearLayout.LayoutParams(dp(52), dp(52)));
+            bookmarkList.addView(row, matchWrap());
         }
     }
 
@@ -365,61 +369,115 @@ public class MainActivity extends Activity {
         toast(n + " product ID(s) added to the Cart page.");
     }
 
-    private void buildDrawer() {
-        final int w = dp(270);
-        scrim = new View(this);
-        scrim.setBackgroundColor(Color.argb(150, 0, 0, 0));
-        scrim.setAlpha(0f);
-        scrim.setVisibility(View.GONE);
-        scrim.setOnClickListener(v -> closeDrawer());
-        root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+    // ================= Bottom island (tab bar) =================
+    static class Tab { LinearLayout view; TabIcon icon; TextView label; }
 
-        drawer = new LinearLayout(this);
-        drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(Color.rgb(20, 20, 20));
-        drawer.setPadding(dp(14), dp(26), dp(14), dp(18));
-        drawer.setClickable(true);
-        TextView menu = new TextView(this);
-        menu.setText("MENU"); menu.setTextColor(MUTED); menu.setTextSize(11); menu.setTypeface(null, Typeface.BOLD);
-        menu.setPadding(dp(14), 0, 0, dp(10));
-        drawer.addView(menu);
-        drawerCartItem = drawerItem("Cart");
-        drawerCartItem.setOnClickListener(v -> { closeDrawer(); showPage(false); });
-        drawerBookmarksItem = drawerItem("Bookmarks  (" + bookmarks.size() + ")");
-        drawerBookmarksItem.setOnClickListener(v -> { closeDrawer(); showPage(true); });
-        root.addView(drawer, new FrameLayout.LayoutParams(w, -1));
-        drawer.setTranslationX(-w);
+    static class TabIcon extends View {
+        static final int CART = 0, BOOKMARK = 1;
+        final int type;
+        boolean selected = false;
+        int color = Color.GRAY;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Path path = new Path();
+        TabIcon(Context c, int type) {
+            super(c);
+            this.type = type;
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeJoin(Paint.Join.ROUND);
+        }
+        void set(boolean sel, int col) { selected = sel; color = col; invalidate(); }
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            p.setColor(color);
+            p.setStrokeWidth(w * 0.085f);
+            Paint.Style body = selected ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE;
+            path.reset();
+            if (type == BOOKMARK) {
+                path.moveTo(w * .26f, h * .12f);
+                path.lineTo(w * .74f, h * .12f);
+                path.lineTo(w * .74f, h * .88f);
+                path.lineTo(w * .50f, h * .68f);
+                path.lineTo(w * .26f, h * .88f);
+                path.close();
+                p.setStyle(body);
+                c.drawPath(path, p);
+            } else {
+                path.moveTo(w * .22f, h * .28f);
+                path.lineTo(w * .92f, h * .28f);
+                path.lineTo(w * .82f, h * .64f);
+                path.lineTo(w * .32f, h * .64f);
+                path.close();
+                p.setStyle(body);
+                c.drawPath(path, p);
+                path.reset();
+                path.moveTo(w * .06f, h * .14f);
+                path.lineTo(w * .18f, h * .14f);
+                path.lineTo(w * .22f, h * .28f);
+                p.setStyle(Paint.Style.STROKE);
+                c.drawPath(path, p);
+                p.setStyle(Paint.Style.FILL);
+                c.drawCircle(w * .40f, h * .84f, w * .07f, p);
+                c.drawCircle(w * .76f, h * .84f, w * .07f, p);
+            }
+        }
     }
 
-    private TextView drawerItem(String text) {
-        TextView t = new TextView(this);
-        t.setText(text); t.setTextColor(WHITE); t.setTextSize(16);
-        t.setPadding(dp(14), dp(14), dp(14), dp(14));
-        t.setClickable(true);
-        LinearLayout.LayoutParams p = matchWrap(); p.bottomMargin = dp(4);
-        drawer.addView(t, p);
+    private LinearLayout island;
+    private Tab tabCart, tabMarks;
+
+    private void buildIsland() {
+        island = new LinearLayout(this);
+        island.setGravity(Gravity.CENTER);
+        island.setPadding(dp(8), dp(8), dp(8), dp(8));
+        island.setBackground(round(PANEL, 36, Color.rgb(56, 56, 58)));
+        island.setElevation(dp(12));
+
+        tabCart = makeTab("Cart", TabIcon.CART);
+        tabMarks = makeTab("Bookmarks", TabIcon.BOOKMARK);
+        island.addView(tabCart.view, new LinearLayout.LayoutParams(dp(104), dp(58)));
+        addGap(island, 4);
+        island.addView(tabMarks.view, new LinearLayout.LayoutParams(dp(104), dp(58)));
+        tabCart.view.setOnClickListener(v -> showPage(false));
+        tabMarks.view.setOnClickListener(v -> showPage(true));
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        lp.bottomMargin = dp(14);
+        root.addView(island, lp);
+    }
+
+    private Tab makeTab(String label, int type) {
+        Tab t = new Tab();
+        t.view = new LinearLayout(this);
+        t.view.setOrientation(LinearLayout.VERTICAL);
+        t.view.setGravity(Gravity.CENTER);
+        t.view.setClickable(true);
+        t.icon = new TabIcon(this, type);
+        t.view.addView(t.icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        t.label = text(label, 11, MUTED);
+        t.label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = dp(3);
+        t.view.addView(t.label, lp);
         return t;
     }
 
-    private void openDrawer() {
-        drawerOpen = true;
-        scrim.setVisibility(View.VISIBLE);
-        scrim.animate().alpha(1f).setDuration(180);
-        drawer.animate().translationX(0).setDuration(180);
-    }
-
-    private void closeDrawer() {
-        drawerOpen = false;
-        scrim.animate().alpha(0f).setDuration(180).withEndAction(() -> { if (!drawerOpen) scrim.setVisibility(View.GONE); });
-        drawer.animate().translationX(-dp(270)).setDuration(180);
+    private void styleTab(Tab t, boolean sel) {
+        t.view.setBackground(sel ? round(Color.rgb(44, 44, 46), 29, 0) : null);
+        int c = sel ? RED : MUTED;
+        t.icon.set(sel, c);
+        t.label.setTextColor(c);
     }
 
     private void showPage(boolean bookmarksPage) {
         onBookmarks = bookmarksPage;
-        homeScroll.setVisibility(bookmarksPage ? View.GONE : View.VISIBLE);
-        bookmarksScroll.setVisibility(bookmarksPage ? View.VISIBLE : View.GONE);
-        drawerCartItem.setBackground(bookmarksPage ? null : round(PANEL, 8, RED));
-        drawerBookmarksItem.setBackground(bookmarksPage ? round(PANEL, 8, RED) : null);
+        ScrollView in = bookmarksPage ? bookmarksScroll : homeScroll;
+        ScrollView out = bookmarksPage ? homeScroll : bookmarksScroll;
+        out.setVisibility(View.GONE);
+        in.setAlpha(0f);
+        in.setVisibility(View.VISIBLE);
+        in.animate().alpha(1f).setDuration(160);
+        styleTab(tabCart, !bookmarksPage);
+        styleTab(tabMarks, bookmarksPage);
         hideKeyboard();
     }
 
@@ -429,35 +487,57 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (drawerOpen) closeDrawer();
-        else if (onBookmarks) showPage(false);
+        if (onBookmarks) showPage(false);
         else super.onBackPressed();
     }
 
-
-    private void refreshSpinner() {
-        if(accountSpinner==null) return;
-        ArrayList<String> labels = new ArrayList<>();
-        if(accounts.isEmpty()) labels.add("No accounts saved");
-        else for(Account a:accounts) labels.add(a.name);
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, labels) {
-            @Override public View getView(int p, View c, ViewGroup parent) {
-                TextView t=(TextView)super.getView(p,c,parent); t.setTextColor(WHITE); t.setTextSize(15); return t;
-            }
-            @Override public View getDropDownView(int p, View c, ViewGroup parent) {
-                TextView t=(TextView)super.getDropDownView(p,c,parent); t.setTextColor(WHITE); t.setBackgroundColor(PANEL); t.setPadding(dp(12),dp(12),dp(12),dp(12)); return t;
-            }
-        };
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        accountSpinner.setAdapter(adapter);
-        if(!accounts.isEmpty()) accountSpinner.setSelection(Math.max(0,Math.min(selectedIndex,accounts.size()-1)));
-        updateAccountHint();
+    // ================= Small UI helpers =================
+    private ScrollView pageScroll() {
+        ScrollView s = new ScrollView(this);
+        s.setFillViewport(true);
+        s.setBackgroundColor(BG);
+        s.setVerticalScrollBarEnabled(false);
+        root.addView(s, new FrameLayout.LayoutParams(-1, -1));
+        return s;
     }
 
-    private void updateAccountHint() {
-        if(accountHint==null) return;
-        if(selectedIndex>=0 && selectedIndex<accounts.size()) accountHint.setText("Saved locally · "+accounts.get(selectedIndex).name);
-        else accountHint.setText("Add an account and paste its SaveProductCart cURL.");
+    private LinearLayout pageColumn(ScrollView s) {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(18), dp(14), dp(18), dp(130));
+        page.setBackgroundColor(BG);
+        s.addView(page);
+        return page;
+    }
+
+    private TextView text(String s, int size, int color) {
+        TextView t = new TextView(this);
+        t.setText(s); t.setTextSize(size); t.setTextColor(color);
+        return t;
+    }
+
+    private TextView largeTitle(String s) {
+        TextView t = text(s, 34, WHITE);
+        t.setTypeface(null, Typeface.BOLD);
+        t.setLetterSpacing(-0.02f);
+        t.setPadding(dp(4), dp(8), 0, 0);
+        return t;
+    }
+
+    private TextView footnote(String s) {
+        TextView t = text(s, 12, MUTED);
+        t.setPadding(dp(16), dp(7), dp(16), 0);
+        return t;
+    }
+
+    private TextView makeLabel(String s) {
+        TextView t = text(s, 12, MUTED);
+        t.setPadding(dp(16), 0, dp(16), 0);
+        return t;
+    }
+
+    private Drawable ripple(int color, int radius) {
+        return new RippleDrawable(ColorStateList.valueOf(Color.argb(60, 255, 255, 255)), round(color, radius, 0), round(Color.WHITE, radius, 0));
     }
 
     private void showAccountDialog(int index) {
@@ -467,10 +547,10 @@ public class MainActivity extends Activity {
         EditText name=new EditText(this); name.setSingleLine(true); name.setHint("Account name (e.g. FC1 – Paru)");
         EditText curl=new EditText(this); curl.setHint("Paste complete SaveProductCart cURL here"); curl.setMinLines(7); curl.setMaxLines(12); curl.setGravity(Gravity.TOP);
         name.setTextColor(WHITE);name.setHintTextColor(MUTED);curl.setTextColor(WHITE);curl.setHintTextColor(MUTED);
-        styleField(name);styleField(curl);
+        styleField(name);styleField(curl);name.setBackground(round(FIELD,10,0));curl.setBackground(round(FIELD,10,0));
         if(editing){name.setText(old.name);curl.setText(old.curl);}
         box.addView(name,matchWrap()); addSpace(box,8); box.addView(curl,matchWrap());
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(editing?"Edit account":"Add FirstCry account")
+        AlertDialog dialog=dialogBuilder().setTitle(editing?"Edit account":"Add FirstCry account")
             .setView(box).setNegativeButton("CANCEL",null).setPositiveButton("SAVE",null).create();
         dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             String n=name.getText().toString().trim(), c=curl.getText().toString().trim();
@@ -481,13 +561,12 @@ public class MainActivity extends Activity {
             saveAccounts();dialog.dismiss();toast("Account saved.");
         }));
         dialog.show();
-        dialog.getWindow().setBackgroundDrawable(round(PANEL,14,Color.DKGRAY));
     }
 
     private void confirmDelete() {
         if(selectedIndex<0||selectedIndex>=accounts.size()){toast("No account selected.");return;}
         String n=accounts.get(selectedIndex).name;
-        new AlertDialog.Builder(this).setTitle("Delete account?")
+        dialogBuilder().setTitle("Delete account?")
             .setMessage("Remove "+n+" and its saved cURL from this app?")
             .setNegativeButton("CANCEL",null).setPositiveButton("DELETE",(d,w)->{
                 accounts.remove(selectedIndex);selectedIndex=accounts.isEmpty()?-1:Math.min(selectedIndex,accounts.size()-1);saveAccounts();toast("Account deleted.");
@@ -503,7 +582,7 @@ public class MainActivity extends Activity {
         final Account account=accounts.get(selectedIndex);
         final CurlRequest request;
         try{request=parseCurl(account.curl);}catch(Exception e){toast("Saved cURL needs updating: "+e.getMessage());return;}
-        addButton.setEnabled(false);addAllButton.setEnabled(false);addButton.setText("ADDING…");
+        addButton.setEnabled(false);addAllButton.setEnabled(false);addButton.setText("Adding…");
         resultView.setText("Sending "+ids.size()+" product(s) using "+account.name+"…");
         executor.execute(()->{
             ArrayList<String> results=new ArrayList<>();int ok=0;
@@ -517,7 +596,7 @@ public class MainActivity extends Activity {
                 main.post(()->resultView.setText(progress+"\n"+join(results)));
             }
             final int success=ok; final String finalText="Finished: "+ok+"/"+ids.size()+" added.\n\n"+join(results)+"\n\nRefresh your FirstCry cart to verify.";
-            main.post(()->{addButton.setEnabled(true);addAllButton.setEnabled(true);addButton.setText("ADD TO CART");resultView.setText(finalText);});
+            main.post(()->{addButton.setEnabled(true);addAllButton.setEnabled(true);addButton.setText("Add to Cart");resultView.setText(finalText);});
         });
     }
 
@@ -527,7 +606,7 @@ public class MainActivity extends Activity {
         LinkedHashSet<String> ids=new LinkedHashSet<>();
         Matcher m=Pattern.compile("\\d+").matcher(raw); while(m.find()) ids.add(m.group());
         if(ids.isEmpty()){toast("Enter at least one numeric product ID.");return;}
-        new AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle("Add to all saved accounts?")
             .setMessage("This will add "+ids.size()+" product(s) to the carts of all "+accounts.size()+" saved account(s). Existing carts will not be cleared.")
             .setNegativeButton("CANCEL",null)
@@ -538,7 +617,7 @@ public class MainActivity extends Activity {
     private void startAddToAll(ArrayList<String> ids, ArrayList<Account> allAccounts) {
         addButton.setEnabled(false);
         addAllButton.setEnabled(false);
-        addAllButton.setText("ADDING TO ALL ACCOUNTS…");
+        addAllButton.setText("Adding to All Accounts…");
         resultView.setText("Starting: "+ids.size()+" product(s) × "+allAccounts.size()+" account(s)…");
         executor.execute(()->{
             ArrayList<String> results=new ArrayList<>();
@@ -572,10 +651,10 @@ public class MainActivity extends Activity {
                     main.post(()->resultView.setText(progress+"\n"+snapshot));
                 }
             }
-            final String finalText="Finished: "+success+" added, "+failed+" failed across "+allAccounts.size()+" account(s).\\n\\n"+join(results)+"\\n\\nRefresh each FirstCry cart to verify.";
+            final String finalText="Finished: "+success+" added, "+failed+" failed across "+allAccounts.size()+" account(s).\n\n"+join(results)+"\n\nRefresh each FirstCry cart to verify.";
             main.post(()->{
                 addButton.setEnabled(true); addAllButton.setEnabled(true);
-                addAllButton.setText("ADD TO ALL ACCOUNT CART");
+                addAllButton.setText("Add to All Accounts");
                 resultView.setText(finalText);
             });
         });
@@ -658,11 +737,10 @@ public class MainActivity extends Activity {
     private final Map<String,String> parsedHeaders=new HashMap<>();
     private void reqHeaderPlaceholder(){}
 
-    private void styleSpinner(Spinner s){s.setBackground(round(PANEL,8,Color.rgb(55,55,55)));}
-    private void styleField(EditText e){e.setTextColor(WHITE);e.setHintTextColor(MUTED);e.setPadding(dp(12),dp(10),dp(12),dp(10));e.setBackground(round(PANEL,8,Color.rgb(65,65,65)));}
-    private GradientDrawable round(int color,int radius,int stroke){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));d.setStroke(dp(1),stroke);return d;}
-    private Button button(String text,boolean primary){Button b=new Button(this);b.setText(text);b.setTextColor(WHITE);b.setTextSize(12);b.setAllCaps(false);b.setTypeface(null,Typeface.BOLD);b.setBackground(round(primary?RED:PANEL,8,primary?RED:Color.rgb(65,65,65)));return b;}
-    private void addLabel(LinearLayout p,String s){TextView t=new TextView(this);t.setText(s);t.setTextColor(MUTED);t.setTextSize(11);t.setTypeface(null,Typeface.BOLD);LinearLayout.LayoutParams lp=matchWrap();lp.bottomMargin=dp(6);p.addView(t,lp);}
+    private void styleField(EditText e){e.setTextColor(WHITE);e.setHintTextColor(Color.GRAY);e.setPadding(dp(16),dp(13),dp(16),dp(13));e.setBackground(round(PANEL,12,0));}
+    private GradientDrawable round(int color,int radius,int stroke){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));if(stroke!=0)d.setStroke(dp(1),stroke);return d;}
+    private Button button(String text,boolean primary){Button b=new Button(this);b.setText(text);b.setTextColor(WHITE);b.setTextSize(15);b.setAllCaps(false);b.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));b.setStateListAnimator(null);b.setMinHeight(0);b.setMinimumHeight(0);b.setBackground(ripple(primary?RED:PANEL,14));return b;}
+    private void addLabel(LinearLayout p,String s){TextView t=makeLabel(s);LinearLayout.LayoutParams lp=matchWrap();lp.bottomMargin=dp(8);p.addView(t,lp);}
     private void addSpace(LinearLayout p,int h){View v=new View(this);p.addView(v,new LinearLayout.LayoutParams(1,dp(h)));}
     private void addGap(LinearLayout p,int w){View v=new View(this);p.addView(v,new LinearLayout.LayoutParams(dp(w),1));}
     private LinearLayout.LayoutParams matchWrap(){return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT);}

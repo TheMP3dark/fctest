@@ -1,6 +1,6 @@
 # FirstCry Quick Cart — Android native project
 
-Black theme, no app lock, native Android Java app.
+AMOLED-black, iOS-style native Android Java app (large titles, rounded grouped cards, floating bottom tab island). No app lock.
 
 ## Build APK on GitHub (no Android Studio required)
 1. Create a **private** repository on GitHub.
@@ -17,7 +17,7 @@ The workflow builds with Java 17, Gradle 8.7 and Android SDK 35. It runs on push
 - Add, edit and delete account profiles.
 - Select an account, paste multiple product IDs and process them sequentially.
 - For each product, call `SaveProductCart`, then `SaveCartDetail`.
-- **Bookmarks:** tap the ☰ burger icon (top-left) to open the menu, then choose **Bookmarks**. Add product IDs (one per line, comma- or space-separated), remove them with ✕, tick any and press **USE SELECTED IN CART** to send them to the Cart page's Product IDs box. Bookmarks are stored locally on the device.
+- **Bookmarks:** use the floating bottom island (Cart | Bookmarks) to switch pages. On Bookmarks, add product IDs (one per line, comma- or space-separated), remove them with ✕, tick any and press **Add Selected to Cart** to send them to the Cart page's Product IDs box. Bookmarks are stored locally on the device.
 
 ## Important API limitation to test
 This is a first native prototype based on the two FirstCry request payloads supplied in the conversation. A browser extension automatically uses the browser's cookie/session context. A native app does not inherit Chrome/Brave/Edge cookies. The app therefore sends the saved `ftk` and the relevant cURL headers (Referer, User-Agent, Cookie if present). If FirstCry requires additional browser-bound cookies or anti-bot/session state, a direct native request may be rejected; the app will show the returned error and we will need to add an account login/session-capture flow.
